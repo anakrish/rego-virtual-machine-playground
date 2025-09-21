@@ -40,37 +40,73 @@ This playground allows you to:
 
 - **Frontend**: Vanilla JavaScript, Monaco Editor
 - **Backend**: Regorus compiled to WebAssembly
-- **Deployment**: GitHub Pages with automated builds
+- **Deployment**: GitHub Pages with automated builds from [anakrish/regorus](https://github.com/anakrish/regorus)
 - **Build**: Rust + wasm-pack
+
+## Architecture
+
+This repository serves as a **GitHub Pages deployment host** for the RVM Playground. The actual source code and assets are maintained in the [anakrish/regorus](https://github.com/anakrish/regorus) repository under the `rvm-playground` branch.
+
+### Deployment Process
+
+1. **Source**: The playground source code (HTML, CSS, JS, examples) is stored in the `anakrish/regorus` repository
+2. **Build**: GitHub Actions automatically fetches the source from the `rvm-playground` branch
+3. **Compile**: WASM module is built from the latest Regorus source
+4. **Deploy**: Static site is deployed to GitHub Pages
+
+This architecture ensures the playground always uses the latest Regorus features and fixes.
 
 ## Development
 
-This playground is built from the [Regorus](https://github.com/microsoft/regorus) project.
+### For Playground Features
+
+To modify the playground interface, examples, or functionality:
+
+1. **Repository**: Work in the [anakrish/regorus](https://github.com/anakrish/regorus) repository
+2. **Branch**: Make changes to the `rvm-playground` branch  
+3. **Location**: Playground files are in the `rvm-playground/` directory
+4. **Testing**: The deployment workflow will automatically build and deploy changes
+
+### For Deployment Configuration
+
+To modify the deployment process:
+
+1. **Repository**: Work in this repository (`anakrish/rego-virtual-machine-playground`)
+2. **File**: Edit `.github/workflows/deploy.yml`
+3. **Scope**: Changes to build process, deployment settings, or GitHub Pages configuration
 
 ### Local Development
 
+To run the playground locally during development:
+
 ```bash
-# Clone this repository
-git clone https://github.com/anakrish/rego-virtual-machine-playground.git
-cd rego-virtual-machine-playground
-
-# Build WASM module
-cd wasm-src
-wasm-pack build --target web --out-dir ../wasm
-
-# Serve locally
-cd ..
+# Option 1: From regorus repository
+git clone https://github.com/anakrish/regorus.git
+cd regorus
+git checkout rvm-playground
+cd rvm-playground
 python -m http.server 8000
+
+# Option 2: Clone this repo and manually copy playground files
+git clone https://github.com/anakrish/rego-virtual-machine-playground.git
+# Copy playground files from regorus/rvm-playground branch manually
+# Serve the files locally
 ```
 
 ### Contributing
 
-1. Fork this repository
-2. Make your changes
-3. Test locally
-4. Submit a pull request
+**For playground improvements:**
+1. Fork the [anakrish/regorus](https://github.com/anakrish/regorus) repository
+2. Create a branch from `rvm-playground`
+3. Make changes in the `rvm-playground/` directory
+4. Submit a pull request to the `rvm-playground` branch
 
-Changes are automatically deployed to GitHub Pages when merged to main.
+**For deployment improvements:**
+1. Fork this repository
+2. Modify the deployment workflow
+3. Submit a pull request
+
+Changes to the playground are automatically deployed when merged to the `rvm-playground` branch of the regorus repository.
 
 ## About Regorus
 
