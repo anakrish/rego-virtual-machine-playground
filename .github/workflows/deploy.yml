@@ -44,7 +44,7 @@ permissions:
 # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
 # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
-  group: "pages-${{ github.ref }}"
+  group: "pages"
   cancel-in-progress: false
 
 env:
@@ -53,12 +53,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Build job
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
     outputs:
-      deployment-url: ${{ steps.pages-info.outputs.base_url }}
+      deployment-url: ${{ steps.deployment.outputs.page_url }}
       wasm-hash: ${{ steps.wasm-build.outputs.hash }}
     
     steps:
@@ -79,20 +81,16 @@ jobs:
           ls -la rvm-playground/ | head -10
       
       - name: Setup Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: wasm32-unknown-unknown
-          override: true
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
       
       - name: Install wasm-pack
-        run: |
-          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       
       - name: Cache Rust dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -133,8 +131,7 @@ jobs:
           wasm-pack build \
             --target web \
             --out-dir ../../rvm-playground/wasm \
-            --scope regorus \
-            -- --features "arc"
+            --scope regorus
           
           # Generate hash for caching
           WASM_HASH=$(find ../../rvm-playground/wasm -name "*.wasm" -exec sha256sum {} \; | sha256sum | cut -d' ' -f1)
@@ -155,54 +152,53 @@ jobs:
           fi
         continue-on-error: true
       
-      - name: Setup Pages configuration
-        id: pages-info
+      - name: Setup Pages
         uses: actions/configure-pages@v4
       
       - name: Prepare deployment directory
         run: |
-          mkdir -p _site
+          mkdir -p deploy
           
           # Copy playground files from regorus source
           cd regorus-source/rvm-playground
-          cp -r *.html *.css *.js *.md ../../_site/ 2>/dev/null || true
-          cp -r wasm ../../_site/ 2>/dev/null || true
+          cp -r *.html *.css *.js *.md ../../deploy/ 2>/dev/null || true
+          cp -r wasm ../../deploy/ 2>/dev/null || true
           
           # Ensure all required files are copied
           for file in index.html style.css app.js README.md; do
             if [[ -f "$file" ]]; then
-              cp "$file" ../../_site/
+              cp "$file" ../../deploy/
             fi
           done
           
           cd ../../
           
-          # Ensure .nojekyll exists
-          touch _site/.nojekyll
+          # Create .nojekyll to bypass Jekyll processing
+          touch deploy/.nojekyll
           
           # Update app.js for production (enable real WASM)
-          if [[ -f "_site/app.js" ]]; then
+          if [[ -f "deploy/app.js" ]]; then
             # Enable WASM import
-            sed -i 's|// import init|import init|g' _site/app.js
-            sed -i 's|// await init()|await init()|g' _site/app.js
+            sed -i 's|// import init|import init|g' deploy/app.js
+            sed -i 's|// await init()|await init()|g' deploy/app.js
             
             # Replace mock WASM loading with real WASM
-            sed -i 's|this\.wasmModule = {.*|this.wasmModule = { Engine, RegoVM, generateAssemblyListing, AssemblyConfig };|g' _site/app.js
+            sed -i 's|this\.wasmModule = {.*|this.wasmModule = { Engine, RegoVM, generateAssemblyListing, AssemblyConfig };|g' deploy/app.js
             
             echo "Updated app.js for production"
           fi
           
           # Add deployment timestamp and source info
-          echo "<!-- Deployed: $(date -u) from anakrish/regorus@rvm-playground -->" >> _site/index.html
+          echo "<!-- Deployed: $(date -u) from anakrish/regorus@rvm-playground -->" >> deploy/index.html
           
-          # Verify deployment structure
-          echo "Deployment structure:"
-          find _site -type f | head -20
+          # Debug output
+          echo "Deployment files prepared:"
+          find deploy -name "*.html" -o -name "*.js" -o -name "*.css" -o -name ".nojekyll" | head -10
       
       - name: Validate deployment
         run: |
           # Check that required files exist
-          required_files=("_site/index.html" "_site/app.js" "_site/style.css")
+          required_files=("deploy/index.html" "deploy/app.js" "deploy/style.css")
           for file in "${required_files[@]}"; do
             if [[ ! -f "$file" ]]; then
               echo "::error::Required file missing: $file"
@@ -211,7 +207,7 @@ jobs:
           done
           
           # Check WASM files
-          if [[ ! -d "_site/wasm" ]] || [[ ! -f "_site/wasm/regorusjs.js" ]]; then
+          if [[ ! -d "deploy/wasm" ]] || [[ ! -f "deploy/wasm/regorusjs.js" ]]; then
             echo "::error::WASM module files missing"
             exit 1
           fi
@@ -219,63 +215,36 @@ jobs:
           echo "Deployment validation passed"
       
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
-          path: '_site'
-          retention-days: 30
+          path: ./deploy
       
       - name: Upload build artifacts (for debugging)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: build-debug-${{ github.run_number }}
           path: |
             regorus-source/bindings/wasm/target/
             regorus-source/rvm-playground/wasm/
-            _site/
+            deploy/
             regorus-source/
           retention-days: 7
 
-  # Deployment job
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    # Only deploy on main branch pushes, manual triggers, or scheduled runs
-    if: |
-      github.ref == 'refs/heads/main' && 
-      (github.event_name == 'push' || 
-       github.event_name == 'workflow_dispatch' || 
-       github.event_name == 'schedule')
-    
-    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
       
-      - name: Post-deployment verification
+      - name: Output deployment info
         run: |
-          # Wait a bit for deployment to propagate
-          sleep 30
-          
-          # Verify the deployment is accessible
-          DEPLOY_URL="${{ steps.deployment.outputs.page_url }}"
-          echo "Verifying deployment at: $DEPLOY_URL"
-          
-          # Basic connectivity check
-          if curl -f -s "$DEPLOY_URL" > /dev/null; then
-            echo "✅ Deployment successful and accessible"
-          else
-            echo "⚠️ Deployment may not be immediately accessible (DNS propagation)"
-          fi
-        continue-on-error: true
+          echo "🚀 RVM Playground deployed successfully!"
+          echo "📍 URL: ${{ steps.deployment.outputs.page_url }}"
+          echo "📝 Source commit: Latest from rvm-playground branch"
 
   # Notification job (runs after deployment)
   notify:
     runs-on: ubuntu-latest
-    needs: [build, deploy]
+    needs: [build-and-deploy]
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     
     steps:
@@ -295,10 +264,10 @@ jobs:
           SOURCE_AUTHOR=$(git log -1 --format='%an')
           SOURCE_DATE=$(git log -1 --format='%ar')
           
-          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+          if [[ "${{ needs.build-and-deploy.result }}" == "success" ]]; then
             echo "🚀 RVM Playground deployed successfully!"
-            echo "📍 URL: ${{ needs.build.outputs.deployment-url }}"
-            echo "🔧 WASM Hash: ${{ needs.build.outputs.wasm-hash }}"
+            echo "📍 URL: ${{ needs.build-and-deploy.outputs.deployment-url }}"
+            echo "🔧 WASM Hash: ${{ needs.build-and-deploy.outputs.wasm-hash }}"
             echo "📅 Trigger: ${{ github.event_name }}"
             echo "📦 Source: anakrish/regorus@rvm-playground"
             echo "🔗 Commit: $SOURCE_COMMIT"
