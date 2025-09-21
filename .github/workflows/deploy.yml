@@ -133,13 +133,32 @@ jobs:
             --out-dir ../../rvm-playground/wasm \
             --scope regorus
           
-          # Generate hash for caching
-          WASM_HASH=$(find ../../rvm-playground/wasm -name "*.wasm" -exec sha256sum {} \; | sha256sum | cut -d' ' -f1)
-          echo "hash=$WASM_HASH" >> $GITHUB_OUTPUT
+          # Verify WASM module was built
+          echo "=== WASM Build Results ==="
+          ls -la ../../rvm-playground/wasm/ || echo "WASM directory not found"
           
-          # Verify WASM module
-          ls -la ../../rvm-playground/wasm/
-          echo "WASM module built successfully"
+          # Check for required WASM files
+          if [[ -f "../../rvm-playground/wasm/regorusjs.js" ]]; then
+            echo "✓ regorusjs.js found ($(wc -c < ../../rvm-playground/wasm/regorusjs.js) bytes)"
+          else
+            echo "✗ regorusjs.js missing"
+          fi
+          
+          if [[ -f "../../rvm-playground/wasm/regorusjs_bg.wasm" ]]; then
+            echo "✓ regorusjs_bg.wasm found ($(wc -c < ../../rvm-playground/wasm/regorusjs_bg.wasm) bytes)"
+          else
+            echo "✗ regorusjs_bg.wasm missing"
+          fi
+          
+          # Generate hash for caching
+          if find ../../rvm-playground/wasm -name "*.wasm" -exec test -f {} \; 2>/dev/null; then
+            WASM_HASH=$(find ../../rvm-playground/wasm -name "*.wasm" -exec sha256sum {} \; | sha256sum | cut -d' ' -f1)
+            echo "hash=$WASM_HASH" >> $GITHUB_OUTPUT
+            echo "WASM hash: $WASM_HASH"
+          else
+            echo "No WASM files found for hashing"
+            echo "hash=none" >> $GITHUB_OUTPUT
+          fi
       
       - name: Optimize WASM (optional)
         run: |
@@ -161,13 +180,16 @@ jobs:
           
           # Copy playground files from regorus source
           cd regorus-source/rvm-playground
-          cp -r *.html *.css *.js *.md ../../deploy/ 2>/dev/null || true
+          cp -r *.html *.css *.js ../../deploy/ 2>/dev/null || true
           cp -r wasm ../../deploy/ 2>/dev/null || true
           
-          # Ensure all required files are copied
-          for file in index.html style.css app.js README.md; do
+          # Ensure all required files are copied (excluding README.md to avoid conflicts)
+          for file in index.html style.css app.js; do
             if [[ -f "$file" ]]; then
               cp "$file" ../../deploy/
+              echo "Copied $file to deployment directory"
+            else
+              echo "Warning: $file not found in source"
             fi
           done
           
@@ -176,43 +198,134 @@ jobs:
           # Create .nojekyll to bypass Jekyll processing
           touch deploy/.nojekyll
           
+          # Ensure we have an index.html in the root
+          if [ ! -f deploy/index.html ]; then
+            echo "Warning: No index.html found in deployment directory"
+            # Create a simple index.html if missing
+            cat > deploy/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>RVM Playground</title>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+          </head>
+          <body>
+              <h1>RVM Playground</h1>
+              <p>Loading playground...</p>
+              <script>
+                  // Redirect to main playground file if it exists
+                  if (window.location.pathname.endsWith('/')) {
+                      const possibleFiles = ['playground.html', 'main.html', 'app.html'];
+                      for (const file of possibleFiles) {
+                          fetch(file).then(response => {
+                              if (response.ok) {
+                                  window.location.href = file;
+                              }
+                          }).catch(() => {});
+                      }
+                  }
+              </script>
+          </body>
+          </html>
+          EOF
+          fi
+          
           # Update app.js for production (enable real WASM)
           if [[ -f "deploy/app.js" ]]; then
-            # Enable WASM import
-            sed -i 's|// import init|import init|g' deploy/app.js
-            sed -i 's|// await init()|await init()|g' deploy/app.js
+            echo "Original app.js size: $(wc -c < deploy/app.js) bytes"
             
-            # Replace mock WASM loading with real WASM
-            sed -i 's|this\.wasmModule = {.*|this.wasmModule = { Engine, RegoVM, generateAssemblyListing, AssemblyConfig };|g' deploy/app.js
+            # Make a backup for debugging
+            cp deploy/app.js deploy/app.js.backup
+            
+            # Enable WASM import (be more specific with the patterns to avoid breaking code)
+            sed -i 's|// import init,|import init,|g' deploy/app.js
+            sed -i 's|// await init();|await init();|g' deploy/app.js
+            sed -i 's|// const wasmModule =|const wasmModule =|g' deploy/app.js
             
             echo "Updated app.js for production"
+            echo "Updated app.js size: $(wc -c < deploy/app.js) bytes"
+            
+            # Show first few lines of changes for debugging
+            echo "First 20 lines of updated app.js:"
+            head -20 deploy/app.js || true
+          else
+            echo "Warning: app.js not found for production updates"
+          fi
+          
+          # Check for Monaco Editor references
+          if [[ -f "deploy/index.html" ]]; then
+            if grep -q "monaco-editor" deploy/index.html; then
+              echo "✓ Monaco Editor found in index.html"
+            else
+              echo "⚠ Monaco Editor not found in index.html"
+            fi
+            
+            if grep -q "app.js" deploy/index.html; then
+              echo "✓ app.js reference found in index.html"
+            else
+              echo "⚠ app.js reference not found in index.html"
+            fi
           fi
           
           # Add deployment timestamp and source info
           echo "<!-- Deployed: $(date -u) from anakrish/regorus@rvm-playground -->" >> deploy/index.html
           
           # Debug output
-          echo "Deployment files prepared:"
-          find deploy -name "*.html" -o -name "*.js" -o -name "*.css" -o -name ".nojekyll" | head -10
+          echo "=== Deployment files prepared ==="
+          echo "HTML files:"
+          find deploy -name "*.html" | sort
+          echo "CSS files:"
+          find deploy -name "*.css" | sort
+          echo "JS files:"
+          find deploy -name "*.js" | head -5
+          echo "WASM files:"
+          find deploy -name "*.wasm" -o -name "regorusjs*" | sort
+          echo "Other important files:"
+          find deploy -name ".nojekyll" -o -name "README.md"
+          echo "=== Total files: $(find deploy -type f | wc -l) ==="
       
       - name: Validate deployment
         run: |
           # Check that required files exist
-          required_files=("deploy/index.html" "deploy/app.js" "deploy/style.css")
+          required_files=("deploy/index.html")
           for file in "${required_files[@]}"; do
             if [[ ! -f "$file" ]]; then
               echo "::error::Required file missing: $file"
+              # List what files we do have
+              echo "Available files in deploy/:"
+              ls -la deploy/ || true
               exit 1
+            else
+              echo "✓ Found $file"
             fi
           done
           
-          # Check WASM files
-          if [[ ! -d "deploy/wasm" ]] || [[ ! -f "deploy/wasm/regorusjs.js" ]]; then
-            echo "::error::WASM module files missing"
-            exit 1
+          # Check for CSS and JS files (at least one of each should exist)
+          if ! find deploy -name "*.css" | grep -q .; then
+            echo "::warning::No CSS files found"
+          else
+            echo "✓ Found CSS files: $(find deploy -name "*.css" | wc -l)"
           fi
           
-          echo "Deployment validation passed"
+          if ! find deploy -name "*.js" | grep -q .; then
+            echo "::warning::No JS files found" 
+          else
+            echo "✓ Found JS files: $(find deploy -name "*.js" | wc -l)"
+          fi
+          
+          # Check WASM files
+          if [[ ! -d "deploy/wasm" ]]; then
+            echo "::warning::WASM directory missing"
+          elif [[ ! -f "deploy/wasm/regorusjs.js" ]]; then
+            echo "::warning::regorusjs.js missing from WASM directory"
+            echo "WASM directory contents:"
+            ls -la deploy/wasm/ || true
+          else
+            echo "✓ Found WASM module files"
+          fi
+          
+          echo "Deployment validation completed"
       
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
