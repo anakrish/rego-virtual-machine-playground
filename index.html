@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RVM Playground - Interactive Regorus Virtual Machine</title>
+    <meta name="description" content="Interactive playground for the Regorus Virtual Machine (RVM). Write, compile, and evaluate Rego policies with real-time assembly generation.">
+    <meta name="keywords" content="rego, opa, policy, virtual machine, regorus, playground, webassembly">
+    <meta name="author" content="Regorus Project">
+    <meta property="og:title" content="RVM Playground">
+    <meta property="og:description" content="Interactive playground for the Regorus Virtual Machine">
+    <meta property="og:type" content="website">
+    <link rel="stylesheet" href="./style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+</head>
+<body>
+    <div class="playground-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1><i class="fas fa-cogs"></i> RVM Playground</h1>
+                <span class="subtitle">Interactive Regorus Virtual Machine</span>
+            </div>
+            <div class="header-right">
+                <button id="compile-btn" class="btn btn-primary" title="Compile policy to RVM assembly">
+                    <i class="fas fa-hammer"></i> Compile
+                </button>
+                <button id="evaluate-btn" class="btn btn-success" title="Evaluate policy with input/data">
+                    <i class="fas fa-play"></i> Evaluate
+                </button>
+                <button id="benchmark-btn" class="btn btn-warning" title="Run performance benchmark">
+                    <i class="fas fa-stopwatch"></i> Benchmark
+                </button>
+                <button id="settings-btn" class="btn btn-secondary" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main content area -->
+        <div class="main-content">
+            <!-- Left panel: Policy Editor -->
+            <div class="panel policy-panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-file-code"></i> Policy Editor</h3>
+                    <div class="panel-actions">
+                        <button id="policy-examples-btn" class="btn btn-small" title="Load example policies">
+                            <i class="fas fa-folder-open"></i> Examples
+                        </button>
+                        <button id="policy-clear-btn" class="btn btn-small" title="Clear policy">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Entry Points Configuration -->
+                <div class="entry-points-section">
+                    <h4><i class="fas fa-bullseye"></i> Entry Points</h4>
+                    <div id="entry-points-list" class="entry-points-list">
+                        <div class="entry-point-item">
+                            <input type="text" class="entry-point-input" value="data.authz.allow" placeholder="e.g., data.package.rule">
+                            <button class="entry-point-remove" title="Remove entry point">×</button>
+                        </div>
+                    </div>
+                    <button id="add-entry-point" class="entry-point-add">
+                        <i class="fas fa-plus"></i> Add Entry Point
+                    </button>
+                </div>
+                
+                <div class="editor-container">
+                    <div id="policy-editor" class="editor"></div>
+                </div>
+            </div>
+
+            <!-- Middle panel: Assembly Listing -->
+            <div class="panel assembly-panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-list"></i> RVM Assembly</h3>
+                    <div class="panel-actions">
+                        <select id="assembly-format" class="select-small">
+                            <option value="readable">Readable</option>
+                            <option value="tabular">Tabular</option>
+                        </select>
+                        <button id="assembly-copy-btn" class="btn btn-small" title="Copy assembly to clipboard">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="editor-container">
+                    <div id="assembly-display" class="assembly-output"></div>
+                </div>
+            </div>
+
+            <!-- Right panel: Input/Data/Results -->
+            <div class="panel data-panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-database"></i> Data & Results</h3>
+                    <div class="panel-actions">
+                        <button id="data-examples-btn" class="btn btn-small" title="Load example data">
+                            <i class="fas fa-folder-open"></i> Examples
+                        </button>
+                    </div>
+                </div>
+                <div class="tabs">
+                    <button class="tab-button active" data-tab="input">Input</button>
+                    <button class="tab-button" data-tab="data">Data</button>
+                    <button class="tab-button" data-tab="results">Results</button>
+                </div>
+                <div class="tab-content">
+                    <div id="input-tab" class="tab-pane active">
+                        <div class="editor-container">
+                            <div id="input-editor" class="editor"></div>
+                        </div>
+                    </div>
+                    <div id="data-tab" class="tab-pane">
+                        <div class="editor-container">
+                            <div id="data-editor" class="editor"></div>
+                        </div>
+                    </div>
+                    <div id="results-tab" class="tab-pane">
+                        <div class="results-container">
+                            <div id="results-display" class="results-output"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status bar -->
+        <footer class="status-bar">
+            <div class="status-left">
+                <span id="status-text">Ready</span>
+            </div>
+            <div class="status-right">
+                <span id="execution-time"></span>
+                <span id="instruction-count"></span>
+                <span id="vm-status">VM: Not loaded</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <h4>Editor Settings</h4>
+                    <label>
+                        <input type="checkbox" id="setting-word-wrap" checked>
+                        Word wrap
+                    </label>
+                    <label>
+                        <input type="checkbox" id="setting-minimap" checked>
+                        Show minimap
+                    </label>
+                    <label>
+                        Theme:
+                        <select id="setting-theme">
+                            <option value="vs">Light</option>
+                            <option value="vs-dark">Dark</option>
+                            <option value="hc-black">High Contrast</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <h4>Assembly Settings</h4>
+                    <label>
+                        <input type="checkbox" id="setting-show-addresses" checked>
+                        Show addresses
+                    </label>
+                    <label>
+                        <input type="checkbox" id="setting-show-comments" checked>
+                        Show comments
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <h4>Evaluation Settings</h4>
+                    <label>
+                        <input type="checkbox" id="setting-auto-evaluate">
+                        Auto-evaluate on change
+                    </label>
+                    <label>
+                        <input type="checkbox" id="setting-show-timing" checked>
+                        Show execution timing
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Examples Modal -->
+    <div id="examples-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="examples-modal-title">Example Policies</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="examples-list" class="examples-list">
+                    <!-- Examples will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monaco Editor -->
+    <script src="https://unpkg.com/monaco-editor@0.44.0/min/vs/loader.js"></script>
+    <script type="module" src="./app.js"></script>
+</body>
+</html>
